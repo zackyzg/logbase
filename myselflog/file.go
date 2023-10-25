@@ -20,8 +20,6 @@ import (
 
 const dateformat = "200601021504" // 可以使用配置文件,这决定了按时间分割的时候是按照分钟、小时、天分割
 
-var logsplittype uint8 = 1 // 日志分割类型1.时间分割2.大小分割;可以使用配置文件
-
 type FileLogger struct {
 	Level       LogLevel
 	filePath    string // 日志路径,可以使用配置文件
@@ -31,6 +29,7 @@ type FileLogger struct {
 	slicingType uint8  // 切割文件方式 1.文件大小切割 2.文件日期切割
 	fileobj     *os.File
 	errfileobj  *os.File
+	logchan     chan *LogInformation
 	// 日志分割方式:大小分割，时间分割
 }
 
@@ -50,11 +49,16 @@ func NewFileLog() *FileLogger {
 		fileName:    fName,
 		errFileName: efName,
 		maxFileSize: int64(mfSize),
+		logchan:     make(chan *LogInformation, logbuffersize),
 	}
 
 	err := fl.initfile()
 	if err != nil {
 		panic(err)
+	}
+
+	for i := 0; i < logoutputsize; i++ {
+		go fl.LogConsumer()
 	}
 
 	return fl
@@ -85,6 +89,23 @@ func (f *FileLogger) close() {
 	f.errfileobj.Close()
 }
 
+func (f *FileLogger) LogConsumer() {
+	for {
+		select {
+		case logdata := <-f.logchan:
+			if f.Level <= logdata.Level {
+				fmt.Fprintf(f.fileobj, "[%s][%s][%s:%s:%d] %s\n", logdata.Timestamp, logdata.Callname, logdata.FileName, logdata.FuncName, logdata.LineNo, logdata.FormatMsg)
+			}
+
+			if logdata.Level >= ERROR {
+				fmt.Fprintf(f.errfileobj, "[%s][%s][%s:%s:%d] %s\n", logdata.Timestamp, logdata.Callname, logdata.FileName, logdata.FuncName, logdata.LineNo, logdata.FormatMsg)
+			}
+		default:
+			time.Sleep(time.Millisecond * 500)
+		}
+	}
+}
+
 func (f *FileLogger) log(callname string, format string, a ...interface{}) {
 
 	switch logsplittype {
@@ -98,7 +119,6 @@ func (f *FileLogger) log(callname string, format string, a ...interface{}) {
 		panic(errors.New("split type parameter error"))
 
 	}
-
 }
 
 func (f *FileLogger) logSizeSplit(callname string, format string, a ...interface{}) {
@@ -109,23 +129,40 @@ func (f *FileLogger) logSizeSplit(callname string, format string, a ...interface
 
 	funcName, filename, lineNo := unusualPosInfo(4)
 	msg := fmt.Sprintf(format, a...)
+
+	logift := &LogInformation{
+		Level:     Loglv,
+		Callname:  callname,
+		FormatMsg: msg,
+		FuncName:  funcName,
+		FileName:  filename,
+		LineNo:    lineNo,
+		Timestamp: time.Now().Format(time.DateTime),
+	}
+
 	if f.Level <= Loglv {
-		newFile, err := f.fileSizeSplit(f.fileobj)
+		newFile, err := f.fileSizeSplit(f.fileobj) // 文件大小切割
 		if err != nil {
 			return
 		}
 		f.fileobj = newFile
-		fmt.Fprintf(f.fileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+		//fmt.Fprintf(f.fileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
 
 	}
 
 	if Loglv >= ERROR {
-		newErrFile, err := f.fileSizeSplit(f.errfileobj)
+		newErrFile, err := f.fileSizeSplit(f.errfileobj) // 文件大小切割
 		if err != nil {
 			return
 		}
 		f.errfileobj = newErrFile
-		fmt.Fprintf(f.errfileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+		//fmt.Fprintf(f.errfileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+	}
+
+	select {
+	case f.logchan <- logift:
+	default:
+		return
 	}
 
 }
@@ -137,16 +174,33 @@ func (f *FileLogger) logTimeSplit(callname string, format string, a ...interface
 	}
 
 	funcName, filename, lineNo := unusualPosInfo(4)
-
-	f.fileTimeSplit()
 	msg := fmt.Sprintf(format, a...)
-	if f.Level <= Loglv {
-		fmt.Fprintf(f.fileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
 
+	logift := &LogInformation{
+		Level:     Loglv,
+		Callname:  callname,
+		FormatMsg: msg,
+		FuncName:  funcName,
+		FileName:  filename,
+		LineNo:    lineNo,
+		Timestamp: time.Now().Format(time.DateTime),
 	}
 
-	if Loglv >= ERROR {
-		fmt.Fprintf(f.errfileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+	f.fileTimeSplit() // 时间切割
+
+	//if f.Level <= Loglv {
+	//	//fmt.Fprintf(f.fileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+	//
+	//}
+	//
+	//if Loglv >= ERROR {
+	//	//fmt.Fprintf(f.errfileobj, "[%s][%s][%s:%s:%d] %s\n", time.Now().Format(time.DateTime), callname, filename, funcName, lineNo, msg)
+	//}
+
+	select {
+	case f.logchan <- logift:
+	default:
+		return
 	}
 
 }

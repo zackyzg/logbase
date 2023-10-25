@@ -24,9 +24,22 @@ type Logger interface {
 	Fatal(format string, a ...interface{})
 }
 
+type LogInformation struct {
+	Level     LogLevel
+	Callname  string
+	FormatMsg string
+	FuncName  string
+	FileName  string
+	LineNo    int
+	Timestamp string
+}
+
 type LogLevel uint16
 
-var loglevellimit LogLevel = DEBUG
+var logsplittype uint8 = 1           // 日志分割类型1.时间分割2.大小分割;可以使用配置文件
+var loglevellimit LogLevel = WARNING // 日志记录级别，级别高于当前设置的日志将被记录
+var logbuffersize int = 50000        // 日志缓冲通道容量
+var logoutputsize int = 10           // 日志取出channel(消费者)goroutine开启数量
 
 const (
 	UNKONW LogLevel = iota

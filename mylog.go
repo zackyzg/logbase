@@ -13,10 +13,14 @@ import (
 	"time"
 )
 
+// [优化建议]为了保证业务代码的执行性能将之前写的日志库改写为异步记录日志方式。
+// 1.将日志信息通过一个或者多个后台goroutine写入通道(生产者)
+// 2.通过多个gouroutine从通道中读取日志信息，写入文件(消费者)
+
 var log myselflog.Logger
 
 func init() {
-	myselflog.SetLogLv("debug")
+	myselflog.SetLogLv("WARNING")
 }
 
 func main() {
@@ -35,7 +39,7 @@ func main() {
 
 		n++
 
-		time.Sleep(time.Second * 1)
+		time.Sleep(time.Millisecond * 100)
 
 		//if n > 120 {
 		//	break
